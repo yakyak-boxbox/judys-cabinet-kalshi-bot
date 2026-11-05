@@ -1,0 +1,11 @@
+# Core is pure stdlib. One tiny dep for timezone data (NY session filter via
+# zoneinfo) on minimal Linux images; harmless if the system already has it.
+tzdata
+
+# Needed only by kalshi_bot.py's live order path (EXEC_LIVE=1) to sign
+# requests with your Kalshi API key. Paper mode (the default) doesn't need it.
+cryptography
+
+# Needed by flow_engine_public.py (live_bias.py's /toolbox/flow feature) to
+# subscribe to Kalshi's WebSocket feeds for the real-time flow dashboard.
+websockets
