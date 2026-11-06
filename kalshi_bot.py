@@ -105,7 +105,7 @@ UA = "judys-cabinet-kalshi-bot/1.0"
 SERIES = {"BTC": "KXBTC15M", "ETH": "KXETH15M"}
 
 def _env(k, d): return os.environ.get(k, d)
-ASSETS      = [a.strip().upper() for a in _env("ASSETS", "BTC,ETH").split(",") if a.strip()]
+ASSETS      = [a.strip().upper() for a in _env("ASSETS", "BTC,ETH").replace("/", ",").split(",") if a.strip()]
 FRAC        = float(_env("FRAC", "0.20"))
 STOP_FRAC   = float(_env("STOP_FRAC", "0.50"))
 START_BANK  = float(_env("START_BANK", "100"))
