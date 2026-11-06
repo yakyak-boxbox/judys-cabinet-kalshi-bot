@@ -419,6 +419,7 @@ class Books:
 
 def log(row):
     row["t"] = now().isoformat()
+    print("KB_EVENT " + json.dumps(row, default=str), flush=True)
     try:
         with open(LEDGER, "a") as f:
             f.write(json.dumps(row) + "\n")
@@ -432,6 +433,7 @@ def audit(row):
     point at to verify what the bot actually did with their money, and it's
     where the real-vs-backtest win-rate comparison lives over time."""
     row["t"] = now().isoformat()
+    print("KB_AUDIT " + json.dumps(row, default=str), flush=True)
     try:
         with open(AUDIT_LOG, "a") as f:
             f.write(json.dumps(row) + "\n")
@@ -925,8 +927,13 @@ def run():
         alert(f"🟢 kalshi_bot started in LIVE mode — balance ${bal:,.2f}, "
               f"assets={ASSETS}, flat-{int(FRAC*100)}% sizing.")
     done = set()    # tickers already settled
+    last_heartbeat = 0.0
 
     while True:
+        if time.time() - last_heartbeat >= 300:
+            last_heartbeat = time.time()
+            print(f"KB_HEARTBEAT {ts()} mode={mode} assets={ASSETS} open={len(open_pos)} "
+                  f"| {books.line()}", flush=True)
         for asset in ASSETS:
             m = current_market(asset)
             if not m or not m["strike"]:
