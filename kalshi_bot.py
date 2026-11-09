@@ -342,6 +342,14 @@ def get_signal_alerts():
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read().decode()).get("alerts", [])
+    except urllib.error.HTTPError as e:
+        reason = e.read()[:200].decode(errors="replace")
+        hint = ("SIGNAL_TOKEN is missing or wrong. Copy the token from app.judyscabinet.com/setup "
+                "into SIGNAL_TOKEN in your Railway variables." if e.code == 403 else "")
+        if time.time() - _signal_err_last[0] >= 600:
+            _signal_err_last[0] = time.time()
+            print(f"{ts()} signal fetch err: HTTP {e.code} {reason} {hint}", flush=True)
+        return []
     except Exception as e:
         print(f"{ts()} signal fetch err: {e}")
         return []
@@ -722,6 +730,50 @@ def close_live_position(ticker, side, price, count):
 
 
 # ---------------------------------------------------------------- startup safety (live only)
+HEALTH_CHECK = _env("HEALTH_CHECK", "1") == "1"
+HEALTH_MARKER = _env("HEALTH_MARKER_FILE", "kalshi_health_check.done")
+_health_last_try = [0.0]
+
+
+def health_check_trade():
+    """One real 1-contract order inside the entry band, to prove the key,
+    shard, and live path work end to end before any signal trade. Runs once
+    per deployment (marker file), retrying every 60s until a market in band
+    exists. Settles with its window like any other position -- check Kalshi."""
+    if not (HEALTH_CHECK and EXEC_LIVE) or os.path.exists(HEALTH_MARKER):
+        return
+    if time.time() - _health_last_try[0] < 60:
+        return
+    _health_last_try[0] = time.time()
+    for asset in ASSETS:
+        m = current_market(asset)
+        if not m or not m.get("ticker"):
+            continue
+        for side in ("yes", "no"):
+            ask = m.get(f"{side}_ask")
+            if ask is None or not (BAND_LO <= ask <= BAND_HI):
+                continue
+            tkr = m["ticker"]
+            try:
+                resp = place_order_live(tkr, side, ask, 1)
+            except Exception as e:
+                log({"ev": "health_check_failed", "asset": asset, "ticker": tkr,
+                     "side": side, "price": ask, "err": str(e)[:300]})
+                alert(f"🧪 HEALTH CHECK ORDER FAILED — {asset} {side.upper()} ({tkr}) "
+                      f"@ {ask:.2f}: {e}")
+                return
+            row = {"ev": "health_check_order", "asset": asset, "ticker": tkr,
+                   "side": side, "price": ask, "count": 1, "response": str(resp)[:300]}
+            audit(row)
+            log(row)
+            with open(HEALTH_MARKER, "w") as f:
+                f.write(json.dumps(row) + "\n")
+            alert(f"🧪 HEALTH CHECK ORDER PLACED — 1 {side.upper()} {asset} ({tkr}) "
+                  f"@ {ask:.2f} (~${ask:.2f}). Live path confirmed. It settles with its window.")
+            return
+    log({"ev": "health_check_waiting", "bands": [BAND_LO, BAND_HI]})
+
+
 def startup_check():
     """Confirm the configured key actually works and return the real balance,
     BEFORE the main loop ever tries to place an order. Returns None (and logs
@@ -928,12 +980,15 @@ def run():
               f"assets={ASSETS}, flat-{int(FRAC*100)}% sizing.")
     done = set()    # tickers already settled
     last_heartbeat = 0.0
+    last_window = {}
 
     while True:
-        if time.time() - last_heartbeat >= 300:
+        if time.time() - last_heartbeat >= 120:
             last_heartbeat = time.time()
             print(f"KB_HEARTBEAT {ts()} mode={mode} assets={ASSETS} open={len(open_pos)} "
                   f"| {books.line()}", flush=True)
+        if EXEC_LIVE:
+            health_check_trade()
         for asset in ASSETS:
             m = current_market(asset)
             if not m or not m["strike"]:
@@ -945,6 +1000,12 @@ def run():
                 print(f"{ts()} {asset} no open market / no strike this cycle — skip")
                 continue
             tkr = m["ticker"]
+            if last_window.get(asset) != tkr:
+                last_window[asset] = tkr
+                log({"ev": "window_open", "asset": asset, "ticker": tkr,
+                     "close_time": m.get("close_time"), "strike": m.get("strike")})
+                print(f"{ts()} {asset} NEW WINDOW {tkr} — closes {m.get('close_time')}; "
+                      f"watching for a call from the last 4 minutes", flush=True)
             tte = (datetime.fromisoformat(m["close_time"].replace("Z", "+00:00")) - now()).total_seconds()
 
             # ---- ENTRY ----------------------------------------------------
