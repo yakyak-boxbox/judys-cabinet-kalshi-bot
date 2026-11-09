@@ -129,7 +129,7 @@ FILL_SLIPPAGE = float(_env("FILL_SLIPPAGE", "0.05"))
 # floor; below it, treat the setup as having changed too much to chase rather
 # than blindly following the price down.
 RETRY_FLOOR = float(_env("RETRY_FLOOR", "0.60"))
-POLL_SEC    = float(_env("POLL_SEC", "5"))
+POLL_SEC    = float(_env("POLL_SEC", "2"))
 LEDGER      = _env("LEDGER", "kalshi_paper.jsonl")
 AUDIT_LOG   = _env("AUDIT_LOG", "kalshi_live_audit.jsonl")
 EXEC_LIVE   = _env("EXEC_LIVE", "0") == "1"
