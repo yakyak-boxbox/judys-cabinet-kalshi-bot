@@ -102,7 +102,8 @@ _load_dotenv()
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
 UA = "judys-cabinet-kalshi-bot/1.0"
 
-SERIES = {"BTC": "KXBTC15M", "ETH": "KXETH15M"}
+SERIES = {"BTC": "KXBTC15M", "ETH": "KXETH15M", "SOL": "KXSOL15M", "XRP": "KXXRP15M",
+          "GOLD": "KXGOLD15M", "SILVER": "KXSILVER15M"}
 
 def _env(k, d): return os.environ.get(k, d)
 ASSETS      = [a.strip().upper() for a in _env("ASSETS", "BTC,ETH").replace("/", ",").split(",") if a.strip()]
@@ -982,6 +983,7 @@ def run():
         alert(f"🟢 kalshi_bot started in LIVE mode — balance ${bal:,.2f}, "
               f"assets={ASSETS}, flat-{int(FRAC*100)}% sizing.")
     done = set()    # tickers already settled
+    acted_calls = set()  # (ticker, call_ts) already entered -- never re-enter the same call
     last_heartbeat = 0.0
     last_window = {}
 
@@ -1038,7 +1040,15 @@ def run():
                                  "tte": round(tte), "signal_side": side})
                             print(f"{ts()} {asset} {tkr} tte={tte:.0f}s Judy called {side.upper()} "
                                   f"but Kalshi has no liquidity on that side — skip")
+                        elif not (max(BAND_LO, _floor(asset)) <= m[f"{side}_ask"] <= BAND_HI):
+                            log({"ev": "signal_price_out_of_band", "asset": asset, "ticker": tkr,
+                                 "side": side, "ask": m[f"{side}_ask"], "tte": round(tte)})
+                            print(f"{ts()} {asset} {tkr} Judy called {side.upper()} but ask "
+                                  f"{m[f'{side}_ask']} is outside the band -- skip", flush=True)
+                        elif (tkr, call_ts) in acted_calls:
+                            pass
                         else:
+                            acted_calls.add((tkr, call_ts))
                             entry_side, entry_ask = side, m[f"{side}_ask"]
                 elif not SIGNAL_MODE and ENTRY_TTE_LO <= tte <= ENTRY_TTE_HI:
                     if m.get("empty", True):
@@ -1121,7 +1131,7 @@ def run():
                             m2 = current_market(asset)
                             if (m2 and m2.get("ticker") == tkr and not m2.get("empty", True)
                                     and m2.get(f"{side}_ask") is not None
-                                    and m2[f"{side}_ask"] >= RETRY_FLOOR):
+                                    and BAND_LO <= m2[f"{side}_ask"] <= BAND_HI):
                                 fresh_ask = m2[f"{side}_ask"]
                                 fresh_price = min(round(fresh_ask + FILL_SLIPPAGE, 4), 0.99)
                                 try:
