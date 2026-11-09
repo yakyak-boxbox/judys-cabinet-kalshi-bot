@@ -321,6 +321,9 @@ def settle_result(ticker):
 
 
 # ---------------------------------------------------------------- signal-following
+_signal_err_last = [0.0]
+
+
 def get_signal_alerts():
     """Fetch the live builder-calls feed. Never raises — a signal-fetch
     failure should degrade to 'no new signal this poll', not crash the bot
