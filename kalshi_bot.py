@@ -109,6 +109,17 @@ def _env(k, d): return os.environ.get(k, d)
 ASSETS      = [a.strip().upper() for a in _env("ASSETS", "BTC,ETH").replace("/", ",").split(",") if a.strip()]
 FRAC        = float(_env("FRAC", "0.20"))
 STOP_FRAC   = float(_env("STOP_FRAC", "0.50"))
+# Live stop exit prices per asset: a position is cut when its bid falls to this
+# nominal price. ETH and BTC are separate so either can be tuned on its own.
+STOP_LEVEL = {"BTC": float(_env("STOP_LEVEL_BTC", "0.35")),
+              "ETH": float(_env("STOP_LEVEL_ETH", "0.35"))}
+
+
+def _stop_hit(asset, entry, bid):
+    """True when the bid has reached this asset's stop exit. Requires the entry to be
+    above the stop level, so a position bought below it can't stop out immediately."""
+    level = STOP_LEVEL.get(asset, 0.35)
+    return entry > level and bid <= level
 START_BANK  = float(_env("START_BANK", "100"))
 BAND_LO     = float(_env("BAND_LO", "0.70"))
 BAND_HI     = float(_env("BAND_HI", "0.95"))
@@ -1235,7 +1246,7 @@ def run():
                     our_bid = m.get(f"{pos['side']}_bid")
                     if our_bid is not None and pos["entry"] > 0:
                         dd = (pos["entry"] - our_bid) / pos["entry"]
-                        if dd >= STOP_FRAC:
+                        if _stop_hit(asset, pos["entry"], our_bid):
                             has_real_position = (EXEC_LIVE and pos.get("live_order") is not None
                                                   and pos.get("count"))
                             if has_real_position:
