@@ -789,6 +789,25 @@ def health_check_trade():
     log({"ev": "health_check_waiting", "bands": [BAND_LO, BAND_HI]})
 
 
+ACTED_CALLS_PATH = _env("ACTED_CALLS_FILE", "kalshi_acted_calls.json")
+
+
+def _load_acted_calls():
+    try:
+        with open(ACTED_CALLS_PATH) as f:
+            return {(t, c) for t, c in json.load(f)}
+    except Exception:
+        return set()
+
+
+def _save_acted_calls(acted):
+    try:
+        with open(ACTED_CALLS_PATH, "w") as f:
+            json.dump(sorted(acted), f)
+    except Exception as e:
+        print(f"{ts()} acted-calls save error: {e}", flush=True)
+
+
 def startup_check():
     """Confirm the configured key actually works and return the real balance,
     BEFORE the main loop ever tries to place an order. Returns None (and logs
@@ -849,8 +868,15 @@ def reconcile_positions(assets):
             print(f"{ts()} RECONCILE {asset} {tkr} already settled ({res}) while down — logged.")
         else:
             side = "yes" if qty > 0 else "no"
+            close_time = strike = None
+            try:
+                mk = _get(f"/markets/{tkr}")
+                mk = mk.get("market", mk)
+                close_time, strike = mk.get("close_time"), mk.get("floor_strike")
+            except Exception as e:
+                print(f"{ts()} RECONCILE {asset} {tkr} could not read market close time: {e}", flush=True)
             reattached[asset] = {"asset": asset, "ticker": tkr, "side": side,
-                                  "entry": None, "strike": None, "close_time": None,
+                                  "entry": None, "strike": strike, "close_time": close_time,
                                   "count": abs(qty), "live_order": None, "reconciled": True}
             audit({"ev": "reconciled_open_position", "asset": asset, "ticker": tkr,
                    "side": side, "count": abs(qty)})
@@ -994,7 +1020,7 @@ def run():
         alert(f"🟢 kalshi_bot started in LIVE mode — balance ${bal:,.2f}, "
               f"assets={ASSETS}, flat-{int(FRAC*100)}% sizing.")
     done = set()    # tickers already settled
-    acted_calls = set()  # (ticker, call_ts) already entered -- never re-enter the same call
+    acted_calls = _load_acted_calls()  # (ticker, call_ts) already entered -- never re-enter the same call
     last_heartbeat = 0.0
     last_window = {}
 
@@ -1060,6 +1086,7 @@ def run():
                             pass
                         else:
                             acted_calls.add((tkr, call_ts))
+                            _save_acted_calls(acted_calls)
                             entry_side, entry_ask = side, m[f"{side}_ask"]
                 elif not SIGNAL_MODE and ENTRY_TTE_LO <= tte <= ENTRY_TTE_HI:
                     if m.get("empty", True):
@@ -1318,7 +1345,7 @@ def run():
             # un-stopped loss with no settle/stop event ever logged, because
             # this check depended on a market object that had already moved
             # on to a different window.
-            if asset in open_pos:
+            if asset in open_pos and open_pos[asset].get("close_time"):
                 pos = open_pos[asset]
                 pos_tte = (datetime.fromisoformat(pos["close_time"].replace("Z", "+00:00")) - now()).total_seconds()
                 if pos_tte < -5:
